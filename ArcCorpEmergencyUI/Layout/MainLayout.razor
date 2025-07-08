@@ -1,5 +1,6 @@
 ﻿@using ArcCorpEmergencyUI.Models
 @using ArcCorpEmergencyUI.Services
+@using System.Text.Json
 @inherits LayoutComponentBase
 @implements IDisposable
 @inject IJSRuntime JSRuntime
@@ -35,7 +36,7 @@
                             @foreach (var chat in chats)
                             {
                                 <div class="chat-item @(currentChatId == chat.Id ? "active" : "")"
-                                     @onclick="() => NavigateToChat(chat.Id)">
+                                @onclick="() => NavigateToChat(chat.Id)">
                                     <span class="icon">💬</span>
                                     <span class="chat-name">@chat.Name</span>
                                     <span class="chat-date">@chat.CreatedAt.ToString("MMM dd")</span>
@@ -79,8 +80,9 @@
 
                 <div class="input-area">
                     <input @bind="newMessage"
-                           @onkeypress="HandleKeyPress"
-                           placeholder="Type your message..." />
+                    @bind:event="oninput"
+                    @onkeypress="HandleKeyPress"
+                    placeholder="Type your message..." />
                     <button @onclick="SendMessage">Send</button>
                 </div>
             </div>
@@ -127,17 +129,64 @@
 
     private async Task LoadMessages()
     {
-        messages = await ChatService.GetMessagesAsync(currentChatId);
-        StateHasChanged();
+        if (!string.IsNullOrEmpty(currentChatId))
+        {
+            messages = await ChatService.GetMessagesAsync(currentChatId);
+            StateHasChanged();
+        }
     }
 
     private async Task SendMessage()
     {
-        if (!string.IsNullOrWhiteSpace(newMessage))
+        if (!string.IsNullOrWhiteSpace(newMessage) && !string.IsNullOrEmpty(currentChatId))
         {
-            await ChatService.SendPromptAsync(currentChatId, newMessage);
+            messages.Add(new MessageModel
+                {
+                    Content = new string(newMessage),
+                    IsUserMessage = true,
+                    CreatedAt = DateTime.Now
+                });
+
+            StateHasChanged(); // Force UI update
+
+            var response = await ChatService.SendPromptAsync(currentChatId, newMessage);
             newMessage = "";
-            await LoadMessages();
+
+            if (response != null)
+            {
+                if (!string.IsNullOrEmpty(response.Message))
+                {
+                    messages.Add(new MessageModel
+                        {
+                            Content = response.Message,
+                            CreatedAt = DateTime.Now,
+                            IsUserMessage = false
+                        });
+                }
+
+                if (response.Success && response.HasCards)
+                {
+                    foreach (var card in response.Cards)
+                    {
+                        Console.WriteLine(JsonSerializer.Serialize(card, new JsonSerializerOptions
+                            {
+                                WriteIndented = true
+                            }));
+
+                        // You can later display these as message-style entries too:
+                        messages.Add(new MessageModel
+                            {
+                                Content = $"✈️ {card.Title} | {card.Location}\n{card.Details}\n{card.Price} | {card.Action?.Url}",
+                                CreatedAt = DateTime.Now,
+                                IsUserMessage = false
+                            });
+                    }
+                }
+
+                StateHasChanged(); // Final refresh
+            }
+
+            // Optional: await LoadMessages(); // use only if backend sync is required
         }
     }
 
@@ -225,8 +274,5 @@
         Navigation.NavigateTo("/");
     }
 
-    public void Dispose()
-    {
-        // Cleanup if needed
-    }
+    public void Dispose() { }
 }
