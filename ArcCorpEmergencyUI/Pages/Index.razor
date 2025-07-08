@@ -1,0 +1,63 @@
+﻿@page "/"
+@layout MainLayout
+
+@if (isAuthenticated)
+{
+    <div class="chat-container">
+        <div class="chat-messages">
+            <!-- Messages will go here -->
+            <div class="message-placeholder">
+                <p>Start chatting!</p>
+            </div>
+        </div>
+
+        <div class="chat-input">
+            <input type="text"
+                   @bind="messageInput"
+                   @bind:event="oninput"
+                   placeholder="Type your message..."
+                   @onkeypress="HandleKeyPress" />
+            <button @onclick="SendMessage"
+                    disabled="@(string.IsNullOrWhiteSpace(messageInput))">
+                Send
+            </button>
+        </div>
+    </div>
+}
+else
+{
+    <div class="auth-prompt">
+        <p>Please log in to start chatting.</p>
+    </div>
+}
+
+@code {
+    private string messageInput = string.Empty;
+    private bool isAuthenticated;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var token = await JSRuntime.InvokeAsync<string?>("localStorage.getItem", "authToken");
+        isAuthenticated = !string.IsNullOrEmpty(token);
+    }
+
+    private void SendMessage()
+    {
+        if (!string.IsNullOrWhiteSpace(messageInput))
+        {
+            // TODO: Implement message sending logic
+            messageInput = string.Empty;
+        }
+    }
+
+    private void HandleKeyPress(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            SendMessage();
+        }
+    }
+
+    [Inject]
+    private IJSRuntime JSRuntime { get; set; } = default!;
+}

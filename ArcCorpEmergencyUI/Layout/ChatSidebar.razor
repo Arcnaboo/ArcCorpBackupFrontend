@@ -1,0 +1,70 @@
+﻿@using ArcCorpEmergencyUI.Models
+@using ArcCorpEmergencyUI.Services
+@inject ApiChatService ChatService
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+<div class="chat-sidebar">
+    <h3>Chats</h3>
+
+    @if (!isLoaded)
+    {
+        <p>Loading chats...</p>
+    }
+    else if (chatList.Count == 0)
+    {
+        <p>No chats yet.</p>
+    }
+    else
+    {
+        <ul class="chat-list">
+            @foreach (var chat in chatList)
+            {
+                <li @onclick="() => SelectChat(chat.Id)" class="chat-entry">
+                    @chat.Name
+                </li>
+            }
+        </ul>
+    }
+
+    <button class="new-chat-button" @onclick="CreateNewChat">+ New Chat</button>
+</div>
+
+@code {
+    private List<ChatModel> chatList = new();
+    private bool isLoaded = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            chatList = await ChatService.GetChatsAsync();
+        }
+        catch
+        {
+            // Ignore silently for now
+        }
+        isLoaded = true;
+    }
+
+    private async Task CreateNewChat()
+    {
+        var result = await ChatService.CreateNewChatAsync();
+        if (result?.ChatModel != null)
+        {
+            chatList.Insert(0, new ChatModel
+                {
+                    Id = result.ChatModel.Id,
+                    Name = result.ChatModel.Name
+                });
+
+            SelectChat(result.ChatModel.Id);
+        }
+    }
+
+    private void SelectChat(string chatId)
+    {
+        // Push the new chatId to querystring so ChatPage can handle it
+        Nav.NavigateTo($"/chat?chatId={chatId}");
+    }
+}

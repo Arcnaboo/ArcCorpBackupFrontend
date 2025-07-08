@@ -1,0 +1,91 @@
+﻿@inherits LayoutComponentBase
+@implements IDisposable
+@inject IJSRuntime JSRuntime
+
+<div class="app-container">
+    <div class="sidebar">
+        <div class="sidebar-header">
+            <h3>ArCommerce Lite</h3>
+        </div>
+        <div class="sidebar-content">
+            @if (isAuthenticated)
+            {
+                <div class="user-section">
+                    <div class="user-info">
+                        <span class="icon">👤</span>
+                        <div class="user-details">
+                            <div class="status">Logged in</div>
+                            <div class="email" title="@userEmail">@userEmail</div>
+                        </div>
+                    </div>
+                    <button class="logout-button" @onclick="Logout">
+                        <span class="icon">🚪</span>
+                        <span>Logout</span>
+                    </button>
+                </div>
+            }
+            else
+            {
+                <button class="login-button" @onclick="ShowLoginModal">
+                    <span class="icon">🔑</span>
+                    <span>Login</span>
+                </button>
+            }
+        </div>
+    </div>
+
+    <div class="main-content">
+        @Body
+    </div>
+
+    <LoginModal @ref="loginModal"
+                OnLoginSuccess="HandleLoginSuccess" />
+</div>
+
+@code {
+    private LoginModal? loginModal;
+    private bool isAuthenticated;
+    private string userEmail = string.Empty;
+    private const string TokenKey = "authToken";
+    private const string EmailKey = "userEmail";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CheckAuthentication();
+    }
+
+    private async Task CheckAuthentication()
+    {
+        var token = await JSRuntime.InvokeAsync<string?>("localStorage.getItem", TokenKey);
+        userEmail = await JSRuntime.InvokeAsync<string?>("localStorage.getItem", EmailKey) ?? string.Empty;
+        isAuthenticated = !string.IsNullOrEmpty(token);
+    }
+
+    private void ShowLoginModal()
+    {
+        loginModal?.Show();
+    }
+
+    private async Task HandleLoginSuccess((string Token, string Email) loginData)
+    {
+        await JSRuntime.InvokeVoidAsync("localStorage.setItem", TokenKey, loginData.Token);
+        await JSRuntime.InvokeVoidAsync("localStorage.setItem", EmailKey, loginData.Email);
+        isAuthenticated = true;
+        userEmail = loginData.Email;
+        StateHasChanged();
+    }
+
+    private async Task Logout()
+    {
+        await JSRuntime.InvokeVoidAsync("localStorage.removeItem", TokenKey);
+        await JSRuntime.InvokeVoidAsync("localStorage.removeItem", EmailKey);
+        isAuthenticated = false;
+        userEmail = string.Empty;
+        StateHasChanged();
+    }
+
+    public void Dispose()
+    {
+        // No cleanup needed for this component
+    }
+}

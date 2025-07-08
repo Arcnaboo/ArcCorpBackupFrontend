@@ -1,0 +1,198 @@
+﻿@using ArcCorpEmergencyUI.Models
+@using System.Text.Json
+@inject HttpClient Http
+
+<div class="@($"modal {(IsVisible ? "visible" : "")}")">
+    <div class="modal-overlay" @onclick="Hide"></div>
+
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>Login</h3>
+            <button class="close-button" @onclick="Hide">×</button>
+        </div>
+
+        <div class="modal-body">
+            @if (CurrentStep == LoginStep.Email)
+            {
+                <div class="form-group">
+                    <label>Email Address</label>
+                    <input @bind="Email"
+                           @bind:event="oninput"
+                           placeholder="your@email.com"
+                           class="form-input" />
+                    <button class="primary-button"
+                            @onclick="SendCodeAsync"
+                            disabled="@(!IsEmailValid || isSending)">
+                        @if (isSending)
+                        {
+                            <span>Sending...</span>
+                        }
+                        else
+                        {
+                            <span>Send Code</span>
+                        }
+                    </button>
+                </div>
+            }
+            else
+            {
+                <div class="form-group">
+                    <label>Enter code sent to @Email</label>
+                    <input @bind="VerificationCode"
+                           @bind:event="oninput"
+                           placeholder="1234"
+                           class="form-input"
+                           maxlength="4" />
+                    <button class="primary-button"
+                            @onclick="VerifyCodeAsync"
+                            disabled="@(!IsCodeValid || isVerifying)">
+                        @if (isVerifying)
+                        {
+                            <span>Verifying...</span>
+                        }
+                        else
+                        {
+                            <span>Login</span>
+                        }
+                    </button>
+                </div>
+            }
+
+            @if (!string.IsNullOrEmpty(Message))
+            {
+                <div class="@(IsError ? "error-message" : "success-message")">
+                    @Message
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter]
+    public EventCallback<(string Token, string Email)> OnLoginSuccess { get; set; }
+
+    public string Email { get; set; } = string.Empty;
+    private string VerificationCode = string.Empty;
+    private string Message = string.Empty;
+    private bool IsError = false;
+    private bool IsVisible = false;
+    private bool isSending = false;
+    private bool isVerifying = false;
+
+    private enum LoginStep { Email, Code }
+    private LoginStep CurrentStep = LoginStep.Email;
+
+    private bool IsEmailValid => !string.IsNullOrEmpty(Email) && Email.Contains('@');
+    private bool IsCodeValid => VerificationCode.Length == 4;
+
+    public void Show()
+    {
+        IsVisible = true;
+        CurrentStep = LoginStep.Email;
+        Email = string.Empty;
+        VerificationCode = string.Empty;
+        Message = string.Empty;
+        StateHasChanged();
+    }
+
+    public void Hide()
+    {
+        IsVisible = false;
+        StateHasChanged();
+    }
+
+    private async Task SendCodeAsync()
+    {
+        isSending = true;
+        Message = "Sending code...";
+        IsError = false;
+        StateHasChanged();
+
+        try
+        {
+            // Using absolute URI to ensure request goes through
+            var requestUri = $"https://arccorpbackendprosustrack-production.up.railway.app/api/users/login?email={Uri.EscapeDataString(Email)}";
+            var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
+
+            var response = await Http.SendAsync(request);
+
+            if (response.IsSuccessStatusCode)
+            {
+                Message = "Verification code sent! Check your email.";
+                CurrentStep = LoginStep.Code;
+            }
+            else
+            {
+                Message = $"Server responded with: {response.StatusCode}";
+                IsError = true;
+            }
+        }
+        catch (Exception ex)
+        {
+            Message = $"Failed to send code: {ex.Message}";
+            IsError = true;
+        }
+        finally
+        {
+            isSending = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task VerifyCodeAsync()
+    {
+        isVerifying = true;
+        Message = "Verifying code...";
+        IsError = false;
+        StateHasChanged();
+
+        try
+        {
+            var requestUri = $"https://arccorpbackendprosustrack-production.up.railway.app/api/users/login?email={Uri.EscapeDataString(Email)}&code={VerificationCode}";
+            var response = await Http.GetAsync(requestUri);
+
+            if (response.IsSuccessStatusCode)
+            {
+                // Parse as LoginResultModel instead of raw string
+                var result = await response.Content.ReadFromJsonAsync<LoginResultModel>();
+
+                if (result?.Success == true && !string.IsNullOrEmpty(result.JwtAuthKey))
+                {
+                    await OnLoginSuccess.InvokeAsync((result.JwtAuthKey, result.Email));
+                    Hide();
+                    return;
+                }
+
+                Message = result?.Message ?? "Login failed (invalid response)";
+                IsError = true;
+            }
+            else
+            {
+                // Try to read error message from response
+                var errorContent = await response.Content.ReadAsStringAsync();
+                Message = !string.IsNullOrEmpty(errorContent)
+                    ? $"Server error: {errorContent}"
+                    : $"HTTP error: {response.StatusCode}";
+                IsError = true;
+            }
+        }
+        catch (JsonException jsonEx)
+        {
+            Message = $"Invalid server response format: {jsonEx.Message}";
+            IsError = true;
+        }
+        catch (Exception ex)
+        {
+            Message = $"Network error: {ex.Message}";
+            IsError = true;
+        }
+        finally
+        {
+            isVerifying = false;
+            StateHasChanged();
+        }
+    }
+
+
+}

@@ -1,0 +1,232 @@
+﻿@using ArcCorpEmergencyUI.Models
+@using ArcCorpEmergencyUI.Services
+@inherits LayoutComponentBase
+@implements IDisposable
+@inject IJSRuntime JSRuntime
+@inject ApiChatService ChatService
+@inject NavigationManager Navigation
+
+<div class="app-container">
+    <div class="sidebar">
+        <div class="sidebar-header">
+            <h3>ArcCorp Emergency</h3>
+        </div>
+        <div class="sidebar-content">
+            @if (isAuthenticated)
+            {
+                <div class="user-section">
+                    <div class="user-info">
+                        <span class="icon">👤</span>
+                        <div class="user-details">
+                            <div class="status">Logged in</div>
+                            <div class="email" title="@userEmail">@userEmail</div>
+                        </div>
+                    </div>
+
+                    <button class="action-button new-chat-button" @onclick="HandleNewChat" disabled="@isCreatingChat">
+                        <span class="icon">✉️</span>
+                        <span>@(isCreatingChat ? "Creating..." : "New Chat")</span>
+                    </button>
+
+                    @if (chats != null && chats.Any())
+                    {
+                        <div class="chat-list">
+                            <h4>Your Chats</h4>
+                            @foreach (var chat in chats)
+                            {
+                                <div class="chat-item @(currentChatId == chat.Id ? "active" : "")"
+                                     @onclick="() => NavigateToChat(chat.Id)">
+                                    <span class="icon">💬</span>
+                                    <span class="chat-name">@chat.Name</span>
+                                    <span class="chat-date">@chat.CreatedAt.ToString("MMM dd")</span>
+                                </div>
+                            }
+                        </div>
+                    }
+
+                    <button class="action-button logout-button" @onclick="Logout">
+                        <span class="icon">🚪</span>
+                        <span>Logout</span>
+                    </button>
+                </div>
+            }
+            else
+            {
+                <button class="action-button login-button" @onclick="ShowLoginModal">
+                    <span class="icon">🔑</span>
+                    <span>Login</span>
+                </button>
+            }
+        </div>
+    </div>
+
+    <div class="main-content">
+        @if (currentChatId != null)
+        {
+            <div class="chat-container">
+                <div class="messages">
+                    @if (messages != null)
+                    {
+                        @foreach (var msg in messages)
+                        {
+                            <div class="message @(msg.IsUserMessage ? "user" : "bot")">
+                                @msg.Content
+                                <div class="timestamp">@msg.CreatedAt.ToString("HH:mm")</div>
+                            </div>
+                        }
+                    }
+                </div>
+
+                <div class="input-area">
+                    <input @bind="newMessage"
+                           @onkeypress="HandleKeyPress"
+                           placeholder="Type your message..." />
+                    <button @onclick="SendMessage">Send</button>
+                </div>
+            </div>
+        }
+        else
+        {
+            <div class="empty-state">
+                <h4>Select a chat from the sidebar</h4>
+            </div>
+        }
+    </div>
+
+    <LoginModal @ref="loginModal" OnLoginSuccess="HandleLoginSuccess" />
+</div>
+
+@code {
+    private LoginModal? loginModal;
+    private bool isAuthenticated;
+    private string userEmail = string.Empty;
+    private bool isCreatingChat = false;
+    private List<ChatModel>? chats;
+    private string? currentChatId;
+    private const string TokenKey = "authToken";
+    private const string EmailKey = "userEmail";
+    private List<MessageModel> messages = new();
+    private string newMessage = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CheckAuthentication();
+        if (isAuthenticated)
+        {
+            await LoadChats();
+        }
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (currentChatId != null)
+        {
+            await LoadMessages();
+        }
+    }
+
+    private async Task LoadMessages()
+    {
+        messages = await ChatService.GetMessagesAsync(currentChatId);
+        StateHasChanged();
+    }
+
+    private async Task SendMessage()
+    {
+        if (!string.IsNullOrWhiteSpace(newMessage))
+        {
+            await ChatService.SendPromptAsync(currentChatId, newMessage);
+            newMessage = "";
+            await LoadMessages();
+        }
+    }
+
+    private async Task HandleKeyPress(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await SendMessage();
+        }
+    }
+
+    private async Task CheckAuthentication()
+    {
+        var token = await JSRuntime.InvokeAsync<string?>("localStorage.getItem", TokenKey);
+        userEmail = await JSRuntime.InvokeAsync<string?>("localStorage.getItem", EmailKey) ?? string.Empty;
+        isAuthenticated = !string.IsNullOrEmpty(token);
+    }
+
+    private async Task LoadChats()
+    {
+        try
+        {
+            chats = await ChatService.GetChatsAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading chats: {ex.Message}");
+        }
+    }
+
+    private async Task HandleNewChat()
+    {
+        if (isCreatingChat) return;
+        isCreatingChat = true;
+
+        try
+        {
+            var result = await ChatService.CreateNewChatAsync();
+            if (result?.Success == true && result.ChatModel != null)
+            {
+                currentChatId = result.ChatModel.Id;
+                await LoadChats();
+                Navigation.NavigateTo($"/chat/{currentChatId}", forceLoad: false);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error creating chat: {ex.Message}");
+        }
+        finally
+        {
+            isCreatingChat = false;
+            StateHasChanged();
+        }
+    }
+
+    private void NavigateToChat(string chatId)
+    {
+        currentChatId = chatId;
+        Navigation.NavigateTo($"/chat/{chatId}");
+    }
+
+    private void ShowLoginModal() => loginModal?.Show();
+
+    private async Task HandleLoginSuccess((string Token, string Email) loginData)
+    {
+        await JSRuntime.InvokeVoidAsync("localStorage.setItem", TokenKey, loginData.Token);
+        await JSRuntime.InvokeVoidAsync("localStorage.setItem", EmailKey, loginData.Email);
+        isAuthenticated = true;
+        userEmail = loginData.Email;
+        await LoadChats();
+        StateHasChanged();
+    }
+
+    private async Task Logout()
+    {
+        await JSRuntime.InvokeVoidAsync("localStorage.removeItem", TokenKey);
+        await JSRuntime.InvokeVoidAsync("localStorage.removeItem", EmailKey);
+        isAuthenticated = false;
+        userEmail = string.Empty;
+        chats = null;
+        currentChatId = null;
+        messages.Clear();
+        StateHasChanged();
+        Navigation.NavigateTo("/");
+    }
+
+    public void Dispose()
+    {
+        // Cleanup if needed
+    }
+}
